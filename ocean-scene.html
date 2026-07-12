@@ -36,6 +36,7 @@
     <div class="slider-group"><label>Wave Height <span class="value" id="valHeight">1.0</span></label><input type="range" id="sliderHeight" min="0" max="3" step="0.05" value="1.0"></div>
     <div class="slider-group"><label>Wave Speed <span class="value" id="valSpeed">1.0</span></label><input type="range" id="sliderSpeed" min="0.1" max="3" step="0.05" value="1.0"></div>
     <div class="slider-group"><label>Wave Frequency <span class="value" id="valFreq">1.0</span></label><input type="range" id="sliderFreq" min="0.2" max="3" step="0.05" value="1.0"></div>
+    <div class="slider-group"><label>Break Distance <span class="value" id="valBreak">3.0</span></label><input type="range" id="sliderBreak" min="1" max="25" step="0.5" value="3.0"></div>
     <div class="divider"></div>
     <div class="hint">🖱 Drag to orbit • Scroll to zoom • R to reset</div>
   </div>
@@ -52,9 +53,10 @@
     // GLOBAL CONFIG
     // ===================================================================
     const CONFIG = {
-      waveHeight: 1.0,
-      waveSpeed: 1.0,
-      waveFrequency: 1.0,
+    waveHeight: 1.0,
+    waveSpeed: 1.0,
+    waveFrequency: 1.0,
+    breakDistance: 3.0,
     };
 
     // ===================================================================
@@ -167,7 +169,6 @@
     const WATER_DEPTH = 120;
     const SHORELINE_Z = 0;
     const SHOAL_ZONE  = 18;    // distance from shore where shoaling begins
-    const BREAK_ZONE  = 3;     // distance from shore where wave peaks & crashes
     const SHOAL_BOOST = 2.2;   // amplitude multiplier at peak shoaling
 
     const WSEGX = 200;
@@ -249,16 +250,17 @@
           // Deep ocean — normal waves
           ampScale = 1.0;
           steepExtra = 0.0;
-        } else if (distToShore >= BREAK_ZONE) {
+        const BREAK_ZONE = CONFIG.breakDistance;
+        if (distToShore >= BREAK_ZONE) {
           // Shoaling zone — waves grow taller as water gets shallow
           const t = 1.0 - (distToShore - BREAK_ZONE) / (SHOAL_ZONE - BREAK_ZONE);
           ampScale = 1.0 + (SHOAL_BOOST - 1.0) * t; // 1.0 -> SHOAL_BOOST
           steepExtra = t * 0.4; // steepness increases as wave shoals
         } else if (distToShore > 0) {
-          // Break zone — wave peaks, then crashes to 0
-          const t = distToShore / BREAK_ZONE; // 1 at outer edge, 0 at shore
-          ampScale = SHOAL_BOOST * t; // SHOAL_BOOST -> 0
-          steepExtra = 0.4 + (1.0 - t) * 0.6; // steepest near shore
+          // Break zone — wave peaks then crashes (breaking)
+          const t = distToShore / BREAK_ZONE;
+          ampScale = SHOAL_BOOST * Math.pow(t, 0.6); // slower initial drop, sharp near shore
+          steepExtra = 0.5 + (1.0 - t) * 1.2; // much steeper for breaking curl
         } else {
           ampScale = 0.0;
           steepExtra = 0.0;
