@@ -198,6 +198,43 @@
     scene.add(water);
 
     // ===================================================================
+    // FOAM LAYER — textured, animated alpha, rolls with crest
+    // ===================================================================
+    const foamGeo = new THREE.PlaneGeometry(WATER_WIDTH, WATER_DEPTH, WSEGX, WSEGZ);
+    foamGeo.rotateX(-Math.PI/2);
+    // procedural foam texture (tiny white dots)
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0,0,size,size);
+    ctx.fillStyle = '#fff';
+    for (let i=0; i<1200; i++) {
+      const x = Math.random()*size, y = Math.random()*size;
+      const r = Math.random()*1.6 + 0.4;
+      ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    }
+    const foamTex = new THREE.CanvasTexture(canvas);
+    foamTex.wrapS = foamTex.wrapT = THREE.RepeatWrapping;
+    foamTex.repeat.set(10, 5);
+    const foamMat = new THREE.MeshBasicMaterial({
+      map: foamTex,
+      transparent: true,
+      vertexColors: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const foam = new THREE.Mesh(foamGeo, foamMat);
+    foam.position.copy(water.position);
+    foam.position.y += 0.08;
+    scene.add(foam);
+
+    // per-vertex alpha for foam fade
+    const foamColors = new Float32Array(foamGeo.attributes.position.count * 3);
+    foamGeo.setAttribute('color', new THREE.BufferAttribute(foamColors, 3));
+
+    // ===================================================================
     // SMOOTHSTEP HELPER
     // ===================================================================
     function smoothstep(a,b,x){const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);}
@@ -245,22 +282,22 @@
         // Shallow water (BREAK_ZONE < dist < SHOAL_ZONE): amplitude grows (shoaling)
         // Break zone (0 < dist < BREAK_ZONE): amplitude peaks then crashes to 0 at shore
         let ampScale, steepExtra;
+        const BREAK_ZONE = CONFIG.breakDistance;
 
         if (distToShore >= SHOAL_ZONE) {
           // Deep ocean — normal waves
           ampScale = 1.0;
           steepExtra = 0.0;
-        const BREAK_ZONE = CONFIG.breakDistance;
-        if (distToShore >= BREAK_ZONE) {
+        } else if (distToShore >= BREAK_ZONE) {
           // Shoaling zone — waves grow taller as water gets shallow
           const t = 1.0 - (distToShore - BREAK_ZONE) / (SHOAL_ZONE - BREAK_ZONE);
-          ampScale = 1.0 + (SHOAL_BOOST - 1.0) * t; // 1.0 -> SHOAL_BOOST
-          steepExtra = t * 0.4; // steepness increases as wave shoals
+          ampScale = 1.0 + (SHOAL_BOOST - 1.0) * t;
+          steepExtra = t * 0.4;
         } else if (distToShore > 0) {
           // Break zone — wave peaks then crashes (breaking)
           const t = distToShore / BREAK_ZONE;
-          ampScale = SHOAL_BOOST * Math.pow(t, 0.6); // slower initial drop, sharp near shore
-          steepExtra = 0.5 + (1.0 - t) * 1.2; // much steeper for breaking curl
+          ampScale = SHOAL_BOOST * Math.pow(t, 0.6);
+          steepExtra = 0.5 + (1.0 - t) * 1.2;
         } else {
           ampScale = 0.0;
           steepExtra = 0.0;
@@ -291,6 +328,59 @@
       posAttr.needsUpdate = true;
       waterGeo.computeVertexNormals();
 
+      // Foam + rolling crest
+      const fPos = foamGeo.attributes.position;
+      const fArr = fPos.array;
+      const fCol = foamGeo.attributes.color.array;
+      const BREAK = CONFIG.breakDistance;
+      let maxA = 0;
+      for (let i = 0; i < vertCount; i++) {
+        const i3 = i * 3;
+        const wx = basePositions[i3];
+        const bz = basePositions[i3 + 2];
+        const wz = bz + water.position.z;
+        const dist = SHORELINE_Z - wz;
+        const t = Math.max(0, Math.min(1, dist / BREAK));
+        const alpha = (dist > 0 && dist < BREAK) ? (1 - t) * 0.85 : 0;
+        maxA = Math.max(maxA, alpha);
+        const roll = (dist > 0 && dist < BREAK) ? (1 - t) * 1.4 : 0;
+
+        // amplitude & steepness in break zone
+        let fAmp = 1.0, fSteep = 0.0;
+        if (dist >= SHOAL_ZONE) {
+          fAmp = 1; fSteep = 0;
+        } else if (dist >= BREAK) {
+          const tt = 1 - (dist - BREAK) / (SHOAL_ZONE - BREAK);
+          fAmp = 1 + (SHOAL_BOOST-1)*tt; fSteep = tt*0.4;
+        } else if (dist > 0) {
+          const tt = dist / BREAK;
+          fAmp = SHOAL_BOOST * Math.pow(tt, 0.6);
+          fSteep = 0.5 + (1-tt)*1.2;
+        } else { fAmp = 0; }
+        fAmp *= CONFIG.waveHeight;
+
+        let fdx=0, fdz=0;
+        for (const w of WAVES) {
+          const freq = w.f * CONFIG.waveFrequency;
+          const amp  = w.a * fAmp;
+          const speed = w.s * CONFIG.waveSpeed;
+          const steep = Math.min(w.st * (1 + fSteep), 0.95);
+          const dot = w.dx * wx + w.dz * wz;
+          const ph = freq * dot - time * 0.9 * speed;
+          const c = Math.cos(ph);
+          fdx -= steep * amp * w.dx * c;
+          fdz -= steep * amp * w.dz * c;
+        }
+        fArr[i3]     = wx + fdx;
+        fArr[i3 + 2] = bz + fdz + roll;
+
+        fCol[i3] = fCol[i3+1] = fCol[i3+2] = alpha;
+      }
+      foamMat.opacity = maxA;
+      fPos.needsUpdate = true;
+      foamGeo.attributes.color.needsUpdate = true;
+      foamGeo.computeVertexNormals();
+
       controls.update();
       renderer.render(scene, camera);
     }
@@ -310,19 +400,24 @@
     const sH = document.getElementById('sliderHeight');
     const sS = document.getElementById('sliderSpeed');
     const sF = document.getElementById('sliderFreq');
+    const sB = document.getElementById('sliderBreak');
     const vH = document.getElementById('valHeight');
     const vS = document.getElementById('valSpeed');
     const vF = document.getElementById('valFreq');
+    const vB = document.getElementById('valBreak');
 
     sH.oninput = () => { CONFIG.waveHeight = +sH.value; vH.textContent = CONFIG.waveHeight.toFixed(2); };
     sS.oninput = () => { CONFIG.waveSpeed = +sS.value; vS.textContent = CONFIG.waveSpeed.toFixed(2); };
     sF.oninput = () => { CONFIG.waveFrequency = +sF.value; vF.textContent = CONFIG.waveFrequency.toFixed(2); };
+    sB.oninput = () => { CONFIG.breakDistance = +sB.value; vB.textContent = CONFIG.breakDistance.toFixed(1); };
 
     window.addEventListener('keydown', e => {
       if (e.key === 'r' || e.key === 'R') {
-        [sH,sS,sF].forEach(s => s.value = '1');
+        [sH,sS,sF,sB].forEach(s => s.value = s===sB?'3':'1');
         CONFIG.waveHeight = CONFIG.waveSpeed = CONFIG.waveFrequency = 1.0;
+        CONFIG.breakDistance = 3.0;
         vH.textContent = vS.textContent = vF.textContent = '1.00';
+        vB.textContent = '3.0';
       }
     });
 
