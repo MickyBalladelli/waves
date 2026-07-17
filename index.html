@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ocean — Realistic Water</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="hud">
+      <h1>Ocean</h1>
+      <div class="row"><label>Sea State</label><span id="vSea">1.0</span></div>
+      <input id="sea" type="range" min="0.2" max="2.5" step="0.05" value="1.0" />
+      <div class="row"><label>Wind Speed</label><span id="vWind">1.0</span></div>
+      <input id="wind" type="range" min="0.2" max="2.5" step="0.05" value="1.0" />
+      <div class="row"><label>Choppiness</label><span id="vChop">1.0</span></div>
+      <input id="chop" type="range" min="0" max="2" step="0.05" value="1.0" />
+      <div class="row"><label>Break Distance</label><span id="vBreak">9.0</span></div>
+      <input id="break" type="range" min="3" max="20" step="0.5" value="9.0" />
+      <p class="hint">Drag orbit · Scroll zoom · R reset</p>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
